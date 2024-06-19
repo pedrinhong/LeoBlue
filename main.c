@@ -79,14 +79,22 @@ static const struct bt_data ad[] = {
 // Callback function
 static void button_changed(uint32_t button_state, uint32_t has_changed){
 	int err;
+	//static int mix = 1;
 	if (has_changed & button_state & USER_BUTTON) {
 		adv_mfg_data.number_press += 1;
+		// if(mix == 1){
+		// 	mix = 2;
+		// }
+		// else{
+		// 	mix = 1;
+		// }
 		//bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
 
 		// Stop advertising.
 		adv_break();
 		// Then resetting data and restarting advertising.
-		adv_start();
+		adv_start(adv_mfg_data.number_press%2);
+		//printk("Counter = %d\n", mix);
 	}
 }
 
@@ -101,18 +109,36 @@ static int init_button(void){
 }
 
 // CALLED BY ADV_UPDATE
-static int create_advertising_coded(void){
+static int create_advertising_coded(int mix){
 	int err;
 	// BT_LE_ADV_OPT_CONNECTABLE |
 	// Determining some aspects of the advertising. Such as advertising interval and kind of modulation.
 	// BT_LE_ADV_PARAM_INIT(options, adv_interval_min, adv_interval_max, peer)
-	struct bt_le_adv_param param =
+
+	// UNCODED 1M
+	struct bt_le_adv_param param_1 =
 		BT_LE_ADV_PARAM_INIT( BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_EXT_ADV |
-				     BT_LE_ADV_OPT_CODED|BT_LE_ADV_OPT_USE_TX_POWER,
+				     BT_LE_ADV_OPT_NO_2M |BT_LE_ADV_OPT_USE_TX_POWER,
 				     800,
 					 801,
 				     NULL);
 
+	// CODED 125k
+	struct bt_le_adv_param param_2 =
+		BT_LE_ADV_PARAM_INIT( BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_EXT_ADV |
+				     BT_LE_ADV_OPT_CODED |BT_LE_ADV_OPT_USE_TX_POWER,
+				     800,
+					 801,
+				     NULL);
+
+	struct bt_le_adv_param param;
+		
+	if(mix == 0){
+		param = param_1;
+	}
+	else{
+		param = param_2;
+	}
 	//BT_GAP_ADV_FAST_INT_MIN_1,
 	//BT_GAP_ADV_FAST_INT_MAX_2,
 
@@ -135,26 +161,28 @@ static int create_advertising_coded(void){
 }
 
 // ENABLING AND STARTING EXTENDED ADVERTISING.
-int adv_start(void){
+int adv_start(int mix){
 	int err;
 	err = bt_enable(NULL); // Enabling Bluetooth stack.
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);
-		return 0;
+		return err;
 	}
 
 	printk("Bluetooth initialized\n");
-	err = create_advertising_coded();
+	err = create_advertising_coded(mix);
 	if (err) {
 		printk("Advertising failed to create (err %d)\n", err);
-		return 0;
+		return err;
 	}
 
 	err = bt_le_ext_adv_start(adv, NULL); // Starting extended advertising.
 	if (err) {
 		printk("Advertising failed to send data (err %d)\n", err);
-		return 0;
+		return err;
 	}
+
+	return 0;
 }
 
 // Used for updating data.
@@ -163,7 +191,7 @@ int adv_break(void){
 	err= bt_le_ext_adv_stop(adv);
 	if (err) {
 		printk("Advertising failed to stop (err %d)\n", err);
-		return 0;
+		return err;
 	}
 	err = bt_disable();
 	if (!err) {
@@ -171,6 +199,7 @@ int adv_break(void){
 		//return 0;
 	}
 
+	return 0;
 }
 
 
@@ -204,14 +233,14 @@ int main(void)
 	err = dk_leds_init();
 	if (err) {
 		printk("LEDs init failed (err %d)\n", err);
-		return 0;
+		return err;
 	}
 	
 	// LED 3 off and LED 4 on
 	gpio_pin_set(dev_gpio0, VCTL1_PIN, 1);
 	gpio_pin_set(dev_gpio0, VCTL2_PIN, 0);
 	//dk_set_led(RUN_STATUS_LED, 1);
-	adv_start();
+	adv_start(0);
 
 	while(1) {
 		dk_set_led(RUN_STATUS_LED, (++led_status) % 2);
