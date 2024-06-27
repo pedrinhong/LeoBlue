@@ -23,9 +23,16 @@
 #include <zephyr/bluetooth/services/bas.h>
 #include <zephyr/bluetooth/services/hrs.h>
 
+#include <zephyr/device.h>>
+#include <zephyr/logging/log.h>
+
 #include <dk_buttons_and_leds.h>
 
 static struct bt_le_ext_adv *adv;
+
+#define K_SECONDS(s) K_MSEC((s) * MSEC_PER_SEC)
+#define K_WORK_DEFINE(work,work_handler) struct k_work work = Z_WORK_INITIALIZER(work_handler)
+#define K_TIMER_DEFINE(name,expiry_fn,stop_fn) STRUCT_SECTION_ITERABLE(k_timer, name) = Z_TIMER_INITIALIZER(name, expiry_fn, stop_fn)
 
 #define DEVICE_NAME            CONFIG_BT_DEVICE_NAME
 #define DEVICE_NAME_LEN        (sizeof(DEVICE_NAME) - 1)
@@ -38,12 +45,14 @@ static struct bt_le_ext_adv *adv;
 #define RUN_LED_BLINK_INTERVAL  1000
 #define VCTL1_PIN 15
 #define VCTL2_PIN 16
+#define VCTL3_PIN 14
 #define USER_BUTTON DK_BTN1_MSK
 
 //Eirballon --> //,0x10,0x22,0x45, 0x49, 0x52, 0x42, 0x41, 0x4C, 0x4C, 0x4F, 0x4F,0x4E, 0x34};
 
 //BT_DATA(BT_DATA_NAME_COMPLETE, DEVICE_NAME, DEVICE_NAME_LEN
 //uint8_t DATA[] = {0x4C,0x65,0x6F,0x42,0x6C,0x75,0x65};
+const struct device *dev_gpio0 = DEVICE_DT_GET(DT_NODELABEL(gpio0));
 uint8_t DATA_2[]={0x0D,0x18,0x00,0x5A,0xFF,0x46,0x49,0x52,0x45};
 
 // -- DATA STRUCTURES
@@ -79,17 +88,8 @@ static const struct bt_data ad[] = {
 // Callback function
 static void button_changed(uint32_t button_state, uint32_t has_changed){
 	int err;
-	//static int mix = 1;
 	if (has_changed & button_state & USER_BUTTON) {
 		adv_mfg_data.number_press += 1;
-		// if(mix == 1){
-		// 	mix = 2;
-		// }
-		// else{
-		// 	mix = 1;
-		// }
-		//bt_le_adv_update_data(ad, ARRAY_SIZE(ad), sd, ARRAY_SIZE(sd));
-
 		// Stop advertising.
 		adv_break();
 		// Then resetting data and restarting advertising.
@@ -97,6 +97,25 @@ static void button_changed(uint32_t button_state, uint32_t has_changed){
 		//printk("Counter = %d\n", mix);
 	}
 }
+
+
+void my_work_handler(struct k_work *work){
+	adv_mfg_data.number_press += 1;
+	gpio_pin_set(dev_gpio0, VCTL3_PIN, adv_mfg_data.number_press%2);
+	// Stop advertising.
+	adv_break();
+	// Then resetting data and restarting advertising.
+	adv_start(adv_mfg_data.number_press%2);
+}
+
+K_WORK_DEFINE(my_work, my_work_handler);
+
+void my_timer_handler(struct k_timer *dummy)
+{
+    k_work_submit(&my_work);
+}
+
+K_TIMER_DEFINE(my_timer, my_timer_handler, NULL);
 
 // Button initialisation
 static int init_button(void){
@@ -117,18 +136,18 @@ static int create_advertising_coded(int mix){
 
 	// UNCODED 1M
 	struct bt_le_adv_param param_1 =
-		BT_LE_ADV_PARAM_INIT( BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_EXT_ADV |
+		BT_LE_ADV_PARAM_INIT(BT_LE_ADV_OPT_EXT_ADV |
 				     BT_LE_ADV_OPT_NO_2M |BT_LE_ADV_OPT_USE_TX_POWER,
-				     800,
-					 801,
+				     BT_GAP_ADV_FAST_INT_MIN_2,
+					 BT_GAP_ADV_FAST_INT_MAX_2,
 				     NULL);
 
 	// CODED 125k
 	struct bt_le_adv_param param_2 =
-		BT_LE_ADV_PARAM_INIT( BT_LE_ADV_OPT_CONNECTABLE | BT_LE_ADV_OPT_EXT_ADV |
+		BT_LE_ADV_PARAM_INIT(BT_LE_ADV_OPT_EXT_ADV |
 				     BT_LE_ADV_OPT_CODED |BT_LE_ADV_OPT_USE_TX_POWER,
-				     800,
-					 801,
+				     BT_GAP_ADV_FAST_INT_MIN_2,
+					 BT_GAP_ADV_FAST_INT_MAX_2,
 				     NULL);
 
 	struct bt_le_adv_param param;
@@ -211,10 +230,9 @@ int main(void)
 
 	printk("Starting Bluetooth Peripheral HR coded example\n");
 	// get the GPIO device
-	const struct device *dev_gpio0;
+	//const struct device *dev_gpio0;
 
 	// - start
-	dev_gpio0 = DEVICE_DT_GET(DT_NODELABEL(gpio0));
 	if (!device_is_ready(dev_gpio0)) {
 		printk("main: gpio not ready\n");
 	}
@@ -222,7 +240,8 @@ int main(void)
 	// configure the LED pin as output
 	gpio_pin_configure(dev_gpio0, VCTL1_PIN, GPIO_OUTPUT_INACTIVE);
   	gpio_pin_configure(dev_gpio0, VCTL2_PIN, GPIO_OUTPUT_INACTIVE);
-
+    gpio_pin_configure(dev_gpio0, VCTL3_PIN, GPIO_OUTPUT_INACTIVE);
+	
 	err = init_button();
 	if (err) {
 		printk("Button init failed (err %d)\n", err);
@@ -235,26 +254,20 @@ int main(void)
 		printk("LEDs init failed (err %d)\n", err);
 		return err;
 	}
-	
+
+	/* start a periodic timer that expires once every second */
+	k_timer_start(&my_timer, K_SECONDS(15), K_SECONDS(15));
+
 	// LED 3 off and LED 4 on
 	gpio_pin_set(dev_gpio0, VCTL1_PIN, 1);
 	gpio_pin_set(dev_gpio0, VCTL2_PIN, 0);
+	//gpio_pin_set(dev_gpio0, VCTL3_PIN, 1);
 	//dk_set_led(RUN_STATUS_LED, 1);
 	adv_start(0);
 
 	while(1) {
 		dk_set_led(RUN_STATUS_LED, (++led_status) % 2);
+		//gpio_pin_set(dev_gpio0, VCTL3_PIN, led_status%2);
 		k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
-
-		// for(int i=0;i<1;i++){
-		// 	k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
-		// }
-		// dk_set_led(RUN_STATUS_LED, 0);
-		// dk_set_led(RUN_STATUS_LED, 0);
-		// adv_break();
-		// for(int i=0;i<30;i++){
-		// 	k_sleep(K_MSEC(RUN_LED_BLINK_INTERVAL));
-		// }
-
 	}
 }
