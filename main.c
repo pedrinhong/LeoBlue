@@ -54,6 +54,7 @@ static struct bt_le_ext_adv *adv;
 //uint8_t DATA[] = {0x4C,0x65,0x6F,0x42,0x6C,0x75,0x65};
 const struct device *dev_gpio0 = DEVICE_DT_GET(DT_NODELABEL(gpio0));
 uint8_t DATA_2[]={0x0D,0x18,0x00,0x5A,0xFF,0x46,0x49,0x52,0x45};
+bool advOn = false, firstOn = true, firstOff = false;
 
 // -- DATA STRUCTURES
 
@@ -86,15 +87,19 @@ static const struct bt_data ad[] = {
 
 
 // Callback function
+// Enable or disable the advertising by button click
 static void button_changed(uint32_t button_state, uint32_t has_changed){
 	int err;
 	if (has_changed & button_state & USER_BUTTON) {
-		adv_mfg_data.number_press += 1;
-		// Stop advertising.
-		adv_break();
-		// Then resetting data and restarting advertising.
-		adv_start(adv_mfg_data.number_press%2);
-		//printk("Counter = %d\n", mix);
+		advOn = !advOn;
+		if(advOn){
+			firstOn = true;
+			gpio_pin_set(dev_gpio0, VCTL2_PIN, 1);
+		}
+		else{
+			firstOff = true;
+			gpio_pin_set(dev_gpio0, VCTL2_PIN, 0);
+		}
 	}
 }
 
@@ -102,10 +107,21 @@ static void button_changed(uint32_t button_state, uint32_t has_changed){
 void my_work_handler(struct k_work *work){
 	adv_mfg_data.number_press += 1;
 	gpio_pin_set(dev_gpio0, VCTL3_PIN, adv_mfg_data.number_press%2);
-	// Stop advertising.
-	adv_break();
-	// Then resetting data and restarting advertising.
-	adv_start(adv_mfg_data.number_press%2);
+	if(advOn){
+		// Stop advertising.
+		if(!firstOn){
+			adv_break();
+		}
+		// Then resetting data and restarting advertising.
+		adv_start(adv_mfg_data.number_press%2);
+		firstOn = false;
+	}
+	else{
+		if(firstOff){
+			adv_break();
+			firstOff = false;
+		}
+	}
 }
 
 K_WORK_DEFINE(my_work, my_work_handler);
@@ -158,8 +174,6 @@ static int create_advertising_coded(int mix){
 	else{
 		param = param_2;
 	}
-	//BT_GAP_ADV_FAST_INT_MIN_1,
-	//BT_GAP_ADV_FAST_INT_MAX_2,
 
 	err = bt_le_ext_adv_create(&param, NULL, &adv);
 	if (err) {
@@ -183,6 +197,7 @@ static int create_advertising_coded(int mix){
 int adv_start(int mix){
 	int err;
 	err = bt_enable(NULL); // Enabling Bluetooth stack.
+	
 	if (err) {
 		printk("Bluetooth init failed (err %d)\n", err);
 		return err;
@@ -263,7 +278,7 @@ int main(void)
 	gpio_pin_set(dev_gpio0, VCTL2_PIN, 0);
 	//gpio_pin_set(dev_gpio0, VCTL3_PIN, 1);
 	//dk_set_led(RUN_STATUS_LED, 1);
-	adv_start(0);
+	//adv_start(0);
 
 	while(1) {
 		dk_set_led(RUN_STATUS_LED, (++led_status) % 2);
