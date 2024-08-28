@@ -1,0 +1,93 @@
+long long scaler = 1e10;
+const char base32[] = "0123456789bcdefghjkmnpqrstuvwxyz";
+
+String EncryptGeohash(float lati, float longi, long long precision){
+  // Scalling coordinates.
+  long long latscaled = lati*scaler;
+  long long longscaled = longi*scaler;
+
+  // Scalling long longervals.
+  long long latleft = -90*scaler, latright = 90*scaler, latmid;
+  long long longleft = -180*scaler, longright = 180*scaler, longmid;
+
+  // Declaring geohash string and auxiliar sum variable to compute 32 base caracheter.
+  //String bhash = "";
+  String hash = "";
+  long long sum32 = 0;
+  
+  for(int i = 0; i < precision*5; i++){
+    
+    if((i%2) == 0){
+      // Longitude.
+      longmid = (longleft+longright)/2;
+//      Serial.print("Sim ou nao: ");
+      if(longscaled < longmid){
+        //bhash += "1";
+//        Serial.print("0");
+        longright = longmid;
+      }
+      else{
+        //bhash += "0";
+//        Serial.print("1");
+        sum32 += (1<<(4-(i%5)));
+        longleft = longmid;
+      }
+//      Serial.print("Longmid = ");
+//      Serial.print(longmid);
+//      Serial.print(" and new interval = [");
+//      Serial.print(longleft);
+//      Serial.print(",");
+//      Serial.print(longright);
+//      Serial.println("]");  
+    }
+    else{
+      // Latitude.  
+      latmid = (latleft+latright)/2;
+//      Serial.print("Sim ou nao: ");
+      if(latscaled < latmid){
+         //bhash += "1";
+//         Serial.print("0");
+         latright = latmid;
+      }
+      else{
+         //bhash += "0";
+//         Serial.print("1");
+         sum32 += (1<<(4-(i%5)));
+         latleft = latmid;
+      }
+//      Serial.print("Latmid = ");
+//      Serial.print(latmid);
+//      Serial.print(" and new interval = [");
+//      Serial.print(latleft);
+//      Serial.print(",");
+//      Serial.print(latright);
+//      Serial.println("]");
+    }
+
+    // Are five consecutive bits computed? If so, new caracter then.
+    if((i+1)%5 == 0){
+      hash += base32[sum32];
+//      Serial.print("Sum is: ");
+//      Serial.println(sum32);
+//      Serial.print("New caracter is: ");
+//      Serial.println(base32[sum32]);
+      sum32 = 0;
+    }
+  }
+  return hash;
+}
+
+void setup() {
+  // put your setup code here, to run once:
+  Serial.begin(115200);
+  while(!Serial);
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  float lati = 44.805787, longi = -0.604827;
+  String hash = EncryptGeohash(lati, longi, 9);
+  Serial.print("Final Geohash is: ");
+  Serial.println(hash);
+  delay(1000000);
+}
